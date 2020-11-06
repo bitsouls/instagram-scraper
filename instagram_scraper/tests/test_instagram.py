@@ -7,7 +7,8 @@ import glob
 from instagram_scraper import InstagramScraper
 from instagram_scraper.constants import *
 
-class InstagramTests(unittest.TestCase):
+
+class TestInstagram(unittest.TestCase):
 
     def setUp(self):
         fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
@@ -40,3 +41,6 @@ class InstagramTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
+
+    def test_case1(self):
+        return

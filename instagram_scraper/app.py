@@ -31,6 +31,11 @@ import concurrent.futures
 import requests
 import requests.packages.urllib3.util.connection as urllib3_connection
 import tqdm
+import boto3
+from pathlib import Path
+from datetime import datetime, timedelta
+from mimetypes import guess_type
+from unidecode import unidecode
 
 from instagram_scraper.constants import *
 
@@ -96,7 +101,9 @@ class InstagramScraper(object):
                             media_types=['image', 'video', 'story-image', 'story-video', 'broadcast'],
                             tag=False, location=False, search_location=False, comments=False,
                             verbose=0, include_location=False, filter=None, proxies={}, no_check_certificate=False,
-                                                        template='{urlname}', log_destination='')
+                            template='{urlname}', log_destination='',
+                            storage_types=['local', ], s3_bucket=None, s3_credentials=None,
+                            rate_limit=0)
 
         allowed_attr = list(default_attr.keys())
         default_attr.update(kwargs)
@@ -104,6 +111,21 @@ class InstagramScraper(object):
         for key in default_attr:
             if key in allowed_attr:
                 self.__dict__[key] = default_attr.get(key)
+
+        if 's3' in self.storage_types:
+            if not self.s3_credentials:
+                self.s3 = boto3.resource('s3')
+            else:
+                with open(self.s3_credentials) as f:
+                    creds = json.load(f)
+                self.s3 = boto3.resource('s3', **creds)
+        else:
+            self.s3 = None
+
+        self.rate_limiter = {
+            'timestamp': None,
+            'count': 0,
+        }
 
         # story media type means story-image & story-video
         if 'story' in self.media_types:
@@ -851,6 +873,16 @@ class InstagramScraper(object):
                 self.posts.append(item)
 
             iter = iter + 1
+            if self.rate_limit > 0:
+                now = int(datetime.utcnow().replace(second=0, microsecond=0).timestamp())
+                if self.rate_limiter['timestamp'] == now:
+                    self.rate_limiter['count'] += 1
+                    if self.rate_limiter['count'] >= self.rate_limit:
+                        self.sleep(int(now + 60 - datetime.utcnow().replace(microsecond=0).timestamp()))
+                else:
+                    self.rate_limiter['timestamp'] = now
+                    self.rate_limiter['count'] = 1
+
             if self.maximum != 0 and iter >= self.maximum:
                 break
 
@@ -1168,7 +1200,7 @@ class InstagramScraper(object):
                                 break
 
                             # In case of exception part_file is not removed on purpose,
-                            # it is easier to exemine it later when analising logs.
+                            # it is easier to examine it later when analysing logs.
                             # Please do not add os.remove here.
                             except (KeyboardInterrupt):
                                 raise
@@ -1203,6 +1235,33 @@ class InstagramScraper(object):
                     timestamp = self.__get_timestamp(item)
                     file_time = int(timestamp if timestamp else time.time())
                     os.utime(file_path, (file_time, file_time))
+
+                    if 's3' in self.storage_types:
+                        with open(file_path, 'rb') as media_file:
+                            p = Path(file_path)
+                            if len(p.parts) < 2:
+                                key = '/'.join([datetime.utcnow().date().isoformat(), p.parts[0]])
+                            else:
+                                key = '/'.join([p.parts[-2], datetime.utcnow().date().isoformat(), p.parts[-1]])
+                            obj = self.s3.Object(self.s3_bucket, key)
+                            content_type = guess_type(file_path)[0] or 'binary/octet-stream'
+
+                            try:
+                                caption = item['edge_media_to_caption']['edges'][0]['node']['text']
+                            except (KeyError, IndexError) as ex:
+                                caption = ''
+
+                            obj.put(
+                                ACL='bucket-owner-full-control',
+                                Body=media_file.read(),
+                                ContentType=content_type,
+                                Metadata={
+                                    'file-time-utc': datetime.utcfromtimestamp(file_time).isoformat(),
+                                }
+                            )
+
+                    if 'local' not in self.storage_types:
+                        os.remove(file_path)
 
             files_path.append(file_path)
 
@@ -1555,6 +1614,14 @@ def main():
     parser.add_argument('--verbose', '-v', type=int, default=0, help='Logging verbosity level')
     parser.add_argument('--template', '-T', type=str, default='{urlname}', help='Customize filename template')
     parser.add_argument('--log_destination', '-l', type=str, default='', help='destination folder for the instagram-scraper.log file')
+    parser.add_argument('--storage-types', nargs='+', default=['local', ],
+                        help='Which storage options to use. Can be local and/or s3.')
+    parser.add_argument('--s3-bucket', default=None,
+                        help='Name of the s3 bucket (required if s3 storage was listed in storage types).')
+    parser.add_argument('--s3-credentials', default=None,
+                        help='Path to a json file containing aws credentials. Can be empty - system wide credentials willl be used in this case.')
+    parser.add_argument('--rate-limit', type=int, default=0,
+                        help='Rate limit for media discovery queries (media per minute). Recommended value is 166.')
 
     args = parser.parse_args()
 
@@ -1600,6 +1667,9 @@ def main():
     if args.retry_forever:
         global MAX_RETRIES
         MAX_RETRIES = sys.maxsize
+
+    if 's3' in args.storage_types and not args.s3_bucket:
+        raise ValueError('You must provide s3 bucket name when listing s3 as a storage type')
 
     scraper = InstagramScraper(**vars(args))
 

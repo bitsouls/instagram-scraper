@@ -4,7 +4,8 @@ from setuptools import setup, find_packages
 requires = [
     'requests>=2.18.4',
     'tqdm>=3.8.0',
-    'moviepy>=1.0.0'
+    'moviepy>=1.0.0',
+    'boto3==1.16.10',
 ]
 
 if sys.version_info < (3, 2):
