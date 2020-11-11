@@ -35,7 +35,7 @@ import boto3
 from pathlib import Path
 from datetime import datetime, timedelta
 from mimetypes import guess_type
-from unidecode import unidecode
+from io import BytesIO
 
 from instagram_scraper.constants import *
 
@@ -1239,10 +1239,12 @@ class InstagramScraper(object):
                     if 's3' in self.storage_types:
                         with open(file_path, 'rb') as media_file:
                             p = Path(file_path)
+                            file_time_str = datetime.utcfromtimestamp(file_time).isoformat()
+                            file_date_str = datetime.utcfromtimestamp(file_time).date().isoformat()
                             if len(p.parts) < 2:
-                                key = '/'.join([datetime.utcnow().date().isoformat(), p.parts[0]])
+                                key = '/'.join([file_date_str, p.parts[0]])
                             else:
-                                key = '/'.join([p.parts[-2], datetime.utcnow().date().isoformat(), p.parts[-1]])
+                                key = '/'.join([p.parts[-2], file_date_str, p.parts[-1]])
                             obj = self.s3.Object(self.s3_bucket, key)
                             content_type = guess_type(file_path)[0] or 'binary/octet-stream'
 
@@ -1256,7 +1258,20 @@ class InstagramScraper(object):
                                 Body=media_file.read(),
                                 ContentType=content_type,
                                 Metadata={
-                                    'file-time-utc': datetime.utcfromtimestamp(file_time).isoformat(),
+                                    'file-time-utc': file_time_str,
+                                    'scrape-time-utc': datetime.utcnow().isoformat(),
+                                }
+                            )
+
+                            caption_key = f'{key}.txt'
+                            obj = self.s3.Object(self.s3_bucket, caption_key)
+                            obj.put(
+                                ACL='bucket-owner-full-control',
+                                Body=caption,
+                                ContentType='text/plain',
+                                Metadata={
+                                    'file-time-utc': file_time_str,
+                                    'scrape-time-utc': datetime.utcnow().isoformat(),
                                 }
                             )
 
