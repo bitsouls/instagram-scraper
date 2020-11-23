@@ -103,7 +103,7 @@ class InstagramScraper(object):
                             verbose=0, include_location=False, filter=None, proxies={}, no_check_certificate=False,
                             template='{urlname}', log_destination='',
                             storage_types=['local', ], s3_bucket=None, s3_credentials=None,
-                            rate_limit=0)
+                            rate_limit=0, s3_subkey='')
 
         allowed_attr = list(default_attr.keys())
         default_attr.update(kwargs)
@@ -1242,9 +1242,17 @@ class InstagramScraper(object):
                             file_time_str = datetime.utcfromtimestamp(file_time).isoformat()
                             file_date_str = datetime.utcfromtimestamp(file_time).date().isoformat()
                             if len(p.parts) < 2:
-                                key = '/'.join([file_date_str, p.parts[0]])
+                                if self.s3_subkey:
+                                    key_bits = [self.s3_subkey, file_date_str, p.parts[0], ]
+                                else:
+                                    key_bits = [file_date_str, p.parts[0], ]
+                                key = '/'.join(key_bits)
                             else:
-                                key = '/'.join([p.parts[-2], file_date_str, p.parts[-1]])
+                                if self.s3_subkey:
+                                    key_bits = [p.parts[-2], self.s3_subkey, file_date_str, p.parts[-1], ]
+                                else:
+                                    key_bits = [p.parts[-2], file_date_str, p.parts[-1], ]
+                                key = '/'.join(key_bits)
                             obj = self.s3.Object(self.s3_bucket, key)
                             content_type = guess_type(file_path)[0] or 'binary/octet-stream'
 
@@ -1633,6 +1641,8 @@ def main():
                         help='Which storage options to use. Can be local and/or s3.')
     parser.add_argument('--s3-bucket', default=None,
                         help='Name of the s3 bucket (required if s3 storage was listed in storage types).')
+    parser.add_argument('--s3-subkey', default='',
+                        help='Will be added after the username.')
     parser.add_argument('--s3-credentials', default=None,
                         help='Path to a json file containing aws credentials. Can be empty - system wide credentials willl be used in this case.')
     parser.add_argument('--rate-limit', type=int, default=0,
