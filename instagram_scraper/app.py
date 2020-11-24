@@ -103,7 +103,7 @@ class InstagramScraper(object):
                             verbose=0, include_location=False, filter=None, proxies={}, no_check_certificate=False,
                             template='{urlname}', log_destination='',
                             storage_types=['local', ], s3_bucket=None, s3_credentials=None,
-                            rate_limit=0, s3_subkey='')
+                            rate_limit=0, s3_subkey='', no_pp=False)
 
         allowed_attr = list(default_attr.keys())
         default_attr.update(kwargs)
@@ -670,7 +670,8 @@ class InstagramScraper(object):
 
                 self.rhx_gis = ""
 
-                self.get_profile_pic(dst, executor, future_to_item, user, username)
+                if not self.no_pp:
+                    self.get_profile_pic(dst, executor, future_to_item, user, username)
                 self.get_profile_info(dst, username)
 
                 if self.logged_in:
@@ -1647,6 +1648,8 @@ def main():
                         help='Path to a json file containing aws credentials. Can be empty - system wide credentials willl be used in this case.')
     parser.add_argument('--rate-limit', type=int, default=0,
                         help='Rate limit for media discovery queries (media per minute). Recommended value is 166.')
+    parser.add_argument('--no-pp', default=False, action='store_true',
+                        help='Skip profile pic scrape')
 
     args = parser.parse_args()
 
